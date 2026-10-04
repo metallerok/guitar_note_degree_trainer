@@ -109,7 +109,10 @@ main{max-width:1240px;margin:0 auto;padding:0 18px 26px}
 .opencell-bg{fill:var(--paper2)}
 .cell{fill:transparent;cursor:pointer}
 .cell:hover{fill:var(--hov)}
-#marks,#crosses{pointer-events:none}
+#scaleMarks,#marks,#crosses{pointer-events:none}
+.g-scale{fill:var(--paper2);stroke:var(--mid);stroke-width:1.2}
+.cell.muted{pointer-events:none}
+.g-string.dimmed,.g-open.dimmed,.g-slbl.dimmed{opacity:.25}
 .found circle{fill:var(--selbg);stroke:var(--line);stroke-width:1.2}
 .found text{fill:var(--selfg);font-size:9.5px;font-weight:700;text-anchor:middle}
 .cross text{
@@ -125,7 +128,6 @@ main{max-width:1240px;margin:0 auto;padding:0 18px 26px}
   font-size:12.5px;font-weight:700;letter-spacing:.08em;cursor:pointer;
 }
 .big:hover{background:var(--wash)}
-.actions .note{font-size:10.5px;color:var(--mid);margin-left:auto}
 @media(max-width:720px){.lbl{min-width:100%}}
 </style>
 </head>
@@ -148,6 +150,18 @@ main{max-width:1240px;margin:0 auto;padding:0 18px 26px}
       <div class="chips" id="degRow"></div>
       <div class="seg" id="degModeRow"></div>
     </div>
+    <div class="ctrl-row">
+      <span class="lbl">SCALE</span>
+      <div class="seg" id="scaleRow"></div>
+    </div>
+    <div class="ctrl-row">
+      <span class="lbl">DISPLAY</span>
+      <div class="seg" id="dispRow"></div>
+    </div>
+    <div class="ctrl-row">
+      <span class="lbl">MODE</span>
+      <div class="seg" id="modeRow"></div>
+    </div>
   </section>
 
   <section class="panel" id="taskSec">
@@ -155,6 +169,7 @@ main{max-width:1240px;margin:0 auto;padding:0 18px 26px}
       <span class="bar-lbl">TASK</span>
       <span id="taskLine">&mdash;</span>
       <span class="spring"></span>
+      <span class="bar-aux" id="mutedLbl" hidden></span>
       <span class="bar-aux" id="progressLbl">PROGRESS 0 / 0</span>
       <span class="bar-aux" id="errorsLbl">ERRORS 0</span>
       <button class="bar-btn" id="nextBtn" hidden>NEXT TASK &rarr;</button>
@@ -173,7 +188,6 @@ main{max-width:1240px;margin:0 auto;padding:0 18px 26px}
   <div class="actions">
     <button class="big" id="newBtn">NEW TASK</button>
     <button class="big" id="resetBtn">RESET PROGRESS</button>
-    <span class="note">progress counts unique found positions &middot; wrong clicks only raise the error counter</span>
   </div>
 </main>
 
@@ -189,6 +203,12 @@ const NOTES = ['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
 
 // Degree label per semitone offset from the tonic (full chromatic set).
 const DEG_NAMES = ['1','♭2','2','♭3','3','4','♭5','5','♭6','6','♭7','7'];
+
+// Scale degrees as semitone offsets from the tonic (natural minor).
+const SCALES = {
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10]
+};
 
 // Open string pitch classes, string 6 (low E) first. Standard tuning.
 const TUNING = [4, 9, 2, 7, 11, 4];
@@ -237,12 +257,16 @@ function selfCheck(){
     if (n !== (want[pc] || 12)) errs.push('count pc' + pc + '=' + n);
   }
   if (total !== 6 * (FRETS + 1)) errs.push('total ' + total);
+  for (const name of Object.keys(SCALES)){
+    const offs = SCALES[name];
+    if (offs.length !== 7 || new Set(offs).size !== 7 || offs[0] !== 0) errs.push('scale ' + name);
+  }
   return errs;
 }
 
 // Export for the test harness.
 if (typeof window !== 'undefined'){
-  window.__MODEL = { NOTES, DEG_NAMES, TUNING, FRETS, notePc, degToPc, targetPositions, selfCheck };
+  window.__MODEL = { NOTES, DEG_NAMES, SCALES, TUNING, FRETS, notePc, degToPc, targetPositions, selfCheck };
 }
 </script>
 
@@ -253,8 +277,10 @@ if (typeof window !== 'undefined'){
    ============================================================ */
 const $ = id => document.getElementById(id);
 const SVGNS = 'http://www.w3.org/2000/svg';
-const LSKEY = 'guitar-trainer-v1';
+const LSKEY = 'guitar-trainer-v2';
 const CROSS_MS = 650;                       // wrong-click marker lifetime
+const FLASH_TARGET = 3;                     // marks needed per flash step
+const FLASH_ADVANCE_MS = 700;               // pause on a finished flash step
 
 function el(name, attrs, parent){
   const e = document.createElementNS(SVGNS, name);
@@ -273,13 +299,19 @@ function h(tag, attrs, parent){
    State (persisted: only the control selections, never the task)
    ============================================================ */
 function defaultState(){
-  return { keyPc:0, degIdx:0, keyRandom:false, degRandom:false };
+  return {
+    keyPc:0, degIdx:0, keyRandom:false, degRandom:false,
+    scale:'major', showNotes:true, flash:false
+  };
 }
 function loadState(){
   try{
     const raw = localStorage.getItem(LSKEY);
     if (!raw) return defaultState();
-    return Object.assign(defaultState(), JSON.parse(raw));
+    const st = Object.assign(defaultState(), JSON.parse(raw));
+    if (!SCALES[st.scale]) st.scale = 'major';
+    if (!SCALES[st.scale].includes(st.degIdx)) st.degIdx = 0;
+    return st;
   }catch(err){ return defaultState(); }
 }
 const state = loadState();
@@ -289,28 +321,71 @@ function save(){ try{ localStorage.setItem(LSKEY, JSON.stringify(state)); }catch
    Task lifecycle
    ============================================================ */
 let task = null;
+let flashErrors = 0;                        // error total across a flash series
+let flashTimer = null;
+
+function cancelFlashTimer(){
+  if (flashTimer){ clearTimeout(flashTimer); flashTimer = null; }
+}
+
+// Random scale-degree offset; `exclude` avoids an immediate repeat (flash).
+function randomScaleDeg(exclude){
+  const offs = SCALES[state.scale];
+  let off;
+  do { off = offs[Math.floor(Math.random() * offs.length)]; } while (off === exclude);
+  return off;
+}
+
+// Two distinct random strings, muted for one flash step.
+function pickMuted(){
+  const a = 1 + Math.floor(Math.random() * 6);
+  let b = 1 + Math.floor(Math.random() * 6);
+  while (b === a) b = 1 + Math.floor(Math.random() * 6);
+  return [a, b];
+}
 
 // New task: honours the random toggles, clears every previous mark.
-function newTask(){
+// opts: { nextDeg, keepSession } — used by the flash auto-advance.
+function newTask(opts){
+  opts = opts || {};
+  cancelFlashTimer();
+  if (!opts.keepSession) flashErrors = 0;
   const keyPc = state.keyRandom ? Math.floor(Math.random() * 12) : state.keyPc;
-  const degIdx = state.degRandom ? Math.floor(Math.random() * 12) : state.degIdx;
+  const degIdx = opts.nextDeg !== undefined ? opts.nextDeg
+    : state.flash ? randomScaleDeg(-1)
+    : state.degRandom ? randomScaleDeg(-1)
+    : state.degIdx;
+  const scale = state.scale, flash = state.flash;
   const targetPc = degToPc(keyPc, degIdx);
+  const positions = targetPositions(targetPc);   // computed from the real tuning
   task = {
-    keyPc, degIdx, targetPc,
-    positions: targetPositions(targetPc),   // computed from the real tuning
-    found: new Set(),                       // unique positions "str:fret"
+    keyPc, degIdx, targetPc, scale, flash, positions,
+    needed: flash ? FLASH_TARGET : positions.length,
+    muted: flash ? pickMuted() : null,           // strings off-limits in flash
+    found: new Set(),                            // unique positions "str:fret"
     errors: 0,
     done: false
   };
   clearCrosses();
+  renderBoardMutes();
   renderTask();
   renderMarks();
   renderStatus();
 }
 
+// Flash auto-advance: next random degree (never the same one twice in a row),
+// fresh mutes, the flash error total carries over.
+function flashAdvance(){
+  cancelFlashTimer();
+  if (!task || !task.flash || !task.done) return;
+  newTask({ nextDeg: randomScaleDeg(task.degIdx), keepSession: true });
+}
+
 // Reset: clear marks and errors, keep the very same task (key/degree/target).
 function resetProgress(){
   if (!task) return;
+  cancelFlashTimer();
+  flashErrors = 0;
   task.found.clear();
   task.errors = 0;
   task.done = false;
@@ -319,17 +394,23 @@ function resetProgress(){
   renderStatus();
 }
 
-// Click correctness: found positions are no-ops, misses show a cross.
+// Click correctness: muted strings and found positions are silent no-ops,
+// misses show a cross. In flash the error counter is per series.
 function onCellClick(str, fret){
   if (!task || task.done) return;
-  if (task.found.has(str + ':' + fret)) return;   // already found: not an error
+  if (task.muted && task.muted.includes(str)) return;   // muted string: ignored
+  if (task.found.has(str + ':' + fret)) return;         // already found: not an error
   if (notePc(str, fret) === task.targetPc){
     task.found.add(str + ':' + fret);
     renderMarks();
-    if (task.found.size === task.positions.length) task.done = true;
+    if (task.found.size >= task.needed){
+      task.done = true;
+      if (task.flash) flashTimer = setTimeout(flashAdvance, FLASH_ADVANCE_MS);
+    }
     renderStatus();
   } else {
     task.errors++;
+    if (task.flash) flashErrors++;
     showCross(str, fret);
     renderStatus();
   }
@@ -388,14 +469,14 @@ function buildBoard(){
   for (let i = 0; i < 6; i++){
     el('line', { x1:G.openX, y1:STR_Y(i), x2:XS[FRETS] + 6, y2:STR_Y(i),
       class:'g-string', 'stroke-width':(1 + i * 0.32).toFixed(2), 'data-str':(i + 1) }, board);
-    const num = el('text', { x:G.numX, y:STR_Y(i) + 3, class:'g-slbl' }, board);
+    const num = el('text', { x:G.numX, y:STR_Y(i) + 3, class:'g-slbl', 'data-str':(i + 1) }, board);
     num.textContent = String(i + 1);
   }
 
   // open-string column: note names (doubles as string labels)
   for (let i = 0; i < 6; i++){
     el('rect', { x:G.openX, y:STR_Y(i) - 15, width:G.openW, height:30, class:'opencell-bg' }, board);
-    const t = el('text', { x:cellCX(0), y:STR_Y(i) + 4, class:'g-open' }, board);
+    const t = el('text', { x:cellCX(0), y:STR_Y(i) + 4, class:'g-open', 'data-str':(i + 1) }, board);
     t.textContent = NOTES[notePc(i + 1, 0)];
   }
 
@@ -423,7 +504,9 @@ function buildBoard(){
     }
   }
 
-  // dynamic layers above the hit rects (never block clicks)
+  // dynamic layers above the hit rects (never block clicks):
+  // scale overlay below the found marks so the task stays on top
+  el('g', { id:'scaleMarks' }, svg);
   el('g', { id:'marks' }, svg);
   el('g', { id:'crosses' }, svg);
 }
@@ -432,42 +515,73 @@ function buildBoard(){
    Rendering
    ============================================================ */
 function renderTask(){
-  $('taskLine').textContent = NOTES[task.keyPc] + ' → ' + DEG_NAMES[task.degIdx] +
-    ' (' + NOTES[task.targetPc] + ')';
+  const degLbl = DEG_NAMES[task.degIdx];
+  $('taskLine').textContent = state.showNotes
+    ? NOTES[task.keyPc] + ' → ' + degLbl + ' (' + NOTES[task.targetPc] + ')'
+    : NOTES[task.keyPc] + ' → ' + degLbl;
   // key chips: highlight the fixed pick, dim the whole row while random
   [...$('keyRow').children].forEach(c =>
     c.classList.toggle('on', !state.keyRandom && +c.dataset.pc === state.keyPc));
   $('keyRow').classList.toggle('off', state.keyRandom);
+  // degree chips: dimmed while random, and fully off while flash drives the degree
+  const degOff = state.flash || state.degRandom;
   [...$('degRow').children].forEach(c =>
-    c.classList.toggle('on', !state.degRandom && +c.dataset.deg === state.degIdx));
-  $('degRow').classList.toggle('off', state.degRandom);
-  // segs
-  for (const [rowId, on] of [['keyModeRow', state.keyRandom], ['degModeRow', state.degRandom]]){
-    [...$(rowId).children].forEach(b =>
-      b.classList.toggle('on', (b.textContent === 'RANDOM') === on));
-  }
+    c.classList.toggle('on', !degOff && +c.dataset.deg === state.degIdx));
+  $('degRow').classList.toggle('off', degOff);
+  $('degModeRow').classList.toggle('off', state.flash);
+  renderSegs();
+  // muted strings readout (flash only)
+  const m = task.flash && task.muted ? [...task.muted].sort((a, b) => a - b) : null;
+  $('mutedLbl').hidden = !m;
+  if (m) $('mutedLbl').textContent = 'MUTED ' + m[0] + '\u00b7' + m[1];
 }
 
 function renderStatus(){
-  const total = task.positions.length;
   $('progressLbl').textContent = task.done
-    ? 'COMPLETE ' + task.found.size + ' / ' + total
-    : 'PROGRESS ' + task.found.size + ' / ' + total;
-  $('errorsLbl').textContent = 'ERRORS ' + task.errors;
-  $('nextBtn').hidden = !task.done;
+    ? 'COMPLETE ' + task.found.size + ' / ' + task.needed
+    : 'PROGRESS ' + task.found.size + ' / ' + task.needed;
+  $('errorsLbl').textContent = 'ERRORS ' + (task.flash ? flashErrors : task.errors);
+  $('nextBtn').hidden = !task.done || task.flash;
+  renderScale();
 }
 
-// Found marks: filled dot with the note name, visible until the task ends.
+// Found marks: filled dot with the note/degree label, visible until the task ends.
 function renderMarks(){
   const g = $('marks');
   while (g.firstChild) g.removeChild(g.firstChild);
+  const label = state.showNotes ? NOTES[task.targetPc] : DEG_NAMES[task.degIdx];
   for (const key of task.found){
     const p = key.split(':');
     const s = +p[0], f = +p[1];
     const fg = el('g', { class:'found' }, g);
     el('circle', { cx:cellCX(f), cy:stringY(s), r:11 }, fg);
     const t = el('text', { x:cellCX(f), y:stringY(s) + 3.2 }, fg);
-    t.textContent = NOTES[task.targetPc];
+    t.textContent = label;
+  }
+}
+
+// Completion overlay: every position of every scale degree, subdued; the
+// task's own marks (rendered above) stay highlighted. Normal mode only.
+function renderScale(){
+  const g = $('scaleMarks');
+  while (g.firstChild) g.removeChild(g.firstChild);
+  if (!task || !task.done || task.flash) return;
+  for (const off of SCALES[task.scale]){
+    const pc = degToPc(task.keyPc, off);
+    for (const p of targetPositions(pc)){
+      el('circle', { cx:cellCX(p.fret), cy:stringY(p.str), r:6, class:'g-scale' }, g);
+    }
+  }
+}
+
+// Muted strings: disable their hit cells and dim the string itself.
+function renderBoardMutes(){
+  const muted = task && task.flash && task.muted ? task.muted : [];
+  document.querySelectorAll('#boardSvg .cell').forEach(c =>
+    c.classList.toggle('muted', muted.includes(+c.dataset.str)));
+  for (const sel of ['.g-string', '.g-open', '.g-slbl']){
+    document.querySelectorAll('#boardSvg ' + sel).forEach(e =>
+      e.classList.toggle('dimmed', muted.includes(+e.dataset.str)));
   }
 }
 
@@ -497,6 +611,34 @@ function clearCrosses(){
 /* ============================================================
    Controls
    ============================================================ */
+// Degree chips follow the chosen scale: 7 chips, data-deg = semitone offset.
+function buildDegChips(){
+  const row = $('degRow');
+  while (row.firstChild) row.removeChild(row.firstChild);
+  SCALES[state.scale].forEach(off => {
+    const b = h('button', { class:'chip', 'data-deg':off }, row);
+    b.textContent = DEG_NAMES[off];
+    b.addEventListener('click', () => {
+      state.degIdx = off;
+      state.degRandom = false;             // explicit pick wins over random
+      save();
+      newTask();
+    });
+  });
+}
+
+// Scale switch: keep the scale-degree number (3 <-> ♭3), rebuild the chips,
+// start a fresh task.
+function switchScale(scale){
+  if (state.scale === scale) return;
+  const pos = SCALES[state.scale].indexOf(state.degIdx);
+  state.scale = scale;
+  state.degIdx = pos >= 0 ? SCALES[scale][pos] : 0;
+  save();
+  buildDegChips();
+  newTask();
+}
+
 function buildControls(){
   const keyRow = $('keyRow');
   NOTES.forEach((name, pc) => {
@@ -509,34 +651,55 @@ function buildControls(){
       newTask();
     });
   });
-  const degRow = $('degRow');
-  DEG_NAMES.forEach((name, idx) => {
-    const b = h('button', { class:'chip', 'data-deg':idx }, degRow);
-    b.textContent = name;
-    b.addEventListener('click', () => {
-      state.degIdx = idx;
-      state.degRandom = false;
+  buildDegChips();
+  // Seg buttons: FIXED|RANDOM applies to the next task, no forced reroll;
+  // SCALE and MODE change the drill itself, so they start a new task right away;
+  // DISPLAY is a pure re-render of labels.
+  buildChoiceSeg('keyModeRow', ['FIXED', 'RANDOM'],
+    () => state.keyRandom ? 'RANDOM' : 'FIXED',
+    v => { state.keyRandom = v === 'RANDOM'; save(); renderTask(); });
+  buildChoiceSeg('degModeRow', ['FIXED', 'RANDOM'],
+    () => state.degRandom ? 'RANDOM' : 'FIXED',
+    v => { state.degRandom = v === 'RANDOM'; save(); renderTask(); });
+  buildChoiceSeg('scaleRow', ['MAJOR', 'MINOR'],
+    () => state.scale.toUpperCase(),
+    v => switchScale(v.toLowerCase()));
+  buildChoiceSeg('dispRow', ['NOTES', 'DEGREES'],
+    () => state.showNotes ? 'NOTES' : 'DEGREES',
+    v => {
+      if (state.showNotes === (v === 'NOTES')) return;
+      state.showNotes = v === 'NOTES';
       save();
-      newTask();
+      renderTask();
+      renderMarks();
     });
-  });
-  // mode segs: FIXED | RANDOM — applies to the next task, no forced reroll
-  buildSeg('keyModeRow', 'keyRandom');
-  buildSeg('degModeRow', 'degRandom');
+  buildChoiceSeg('modeRow', ['NORMAL', 'FLASH'],
+    () => state.flash ? 'FLASH' : 'NORMAL',
+    v => {
+      if (state.flash === (v === 'FLASH')) return;
+      state.flash = v === 'FLASH';
+      save();
+      newTask();                           // fresh series: flash errors reset
+    });
   $('newBtn').addEventListener('click', newTask);
   $('resetBtn').addEventListener('click', resetProgress);
   $('nextBtn').addEventListener('click', newTask);
 }
-function buildSeg(rowId, flag){
+
+const SEGS = [];
+function buildChoiceSeg(rowId, options, getCur, onPick){
   const row = $(rowId);
-  for (const label of ['FIXED', 'RANDOM']){
+  for (const val of options){
     const b = h('button', {}, row);
-    b.textContent = label;
-    b.addEventListener('click', () => {
-      state[flag] = label === 'RANDOM';
-      save();
-      renderTask();
-    });
+    b.textContent = val;
+    b.addEventListener('click', () => onPick(val));
+  }
+  SEGS.push({ rowId, getCur });
+}
+function renderSegs(){
+  for (const s of SEGS){
+    [...$(s.rowId).children].forEach(b =>
+      b.classList.toggle('on', b.textContent === s.getCur()));
   }
 }
 
@@ -552,7 +715,10 @@ window.__APP = {
   state, getTask: () => task,
   newTask, resetProgress, onCellClick,
   showCross, hideCross, clearCrosses,
-  renderTask, renderStatus, renderMarks, CROSS_MS
+  renderTask, renderStatus, renderMarks, renderScale, renderBoardMutes,
+  switchScale, flashAdvance, cancelFlashTimer,
+  getFlashErrors: () => flashErrors,
+  CROSS_MS, FLASH_ADVANCE_MS, FLASH_TARGET
 };
 </script>
 </body>
