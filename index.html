@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guitar Trainer — Fretboard Note &amp; Degree Drill</title>
+<style>
+/* ============================================================
+   Theme: vintage printed chart (matches the guitar poster).
+   Paper/ink pair via CSS variables, thin rules, no cards.
+   Dark theme is the only theme (warm near-black + cream ink).
+   ============================================================ */
+:root{
+  --paper:#f4f1e8;
+  --paper2:#efeade;
+  --ink:#191712;
+  --line:#3a362c;
+  --mid:#7a7365;
+  --wash:#e6e0d0;
+  --selbg:#191712;
+  --selfg:#f4f1e8;
+  --auxdim:#cfc9b8;
+  --hov:#dcd5c2;
+  --err:#a03826;
+}
+body.dark{
+  --paper:#26231c;
+  --paper2:#2e2a22;
+  --ink:#d6cfbc;
+  --line:#635d4e;
+  --mid:#938b77;
+  --wash:#37332a;
+  --selbg:#d6cfbc;
+  --selfg:#26231c;
+  --auxdim:#8a826e;
+  --hov:#3f3a30;
+  --err:#d0765f;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Helvetica Neue",Helvetica,Arial,"Segoe UI",sans-serif;
+  font-size:13px;
+  -webkit-font-smoothing:antialiased;
+}
+[hidden]{display:none!important}
+button{font-family:inherit;color:inherit}
+h1{margin:0;font-size:19px;font-weight:800;letter-spacing:.08em}
+svg text{user-select:none;fill:var(--ink)}
+
+header.top{
+  max-width:1240px;margin:0 auto;padding:14px 18px 10px;
+  display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+}
+.tagline{font-size:11px;color:var(--mid);letter-spacing:.04em}
+main{max-width:1240px;margin:0 auto;padding:0 18px 26px}
+.panel{border:1px solid var(--ink);background:var(--paper)}
+.panel + .panel{margin-top:12px}
+
+/* ---------- task bar ---------- */
+.bar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:var(--selbg);color:var(--selfg);padding:7px 10px;
+}
+.bar-lbl{font-size:10px;font-weight:700;letter-spacing:.16em}
+#taskLine{font-size:16px;font-weight:800;letter-spacing:.03em}
+.spring{flex:1}
+.bar-aux{font-size:10.5px;letter-spacing:.08em;font-weight:600;color:var(--auxdim)}
+.bar-btn{
+  border:1px solid var(--selfg);background:transparent;color:var(--selfg);
+  font-size:10.5px;font-weight:700;letter-spacing:.08em;padding:3px 10px;cursor:pointer;
+}
+.bar-btn:hover{background:var(--selfg);color:var(--selbg)}
+
+/* ---------- controls ---------- */
+.ctrl-row{display:flex;align-items:flex-start;gap:10px;padding:8px 10px;flex-wrap:wrap}
+.ctrl-row + .ctrl-row{border-top:1px solid var(--line)}
+.lbl{font-size:9.5px;letter-spacing:.16em;font-weight:700;color:var(--mid);min-width:52px;padding-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:3px}
+.chips.off{opacity:.4;pointer-events:none}
+.chip{
+  border:1px solid var(--ink);background:transparent;padding:2px 8px;
+  font-size:11.5px;font-weight:600;cursor:pointer;
+}
+.chip:hover{background:var(--wash)}
+.chip.on{background:var(--selbg);color:var(--selfg)}
+.seg{display:flex}
+.seg button{
+  border:1px solid var(--ink);border-right-width:0;background:transparent;
+  padding:2px 9px;font-size:10.5px;font-weight:700;letter-spacing:.06em;cursor:pointer;
+}
+.seg button:last-child{border-right-width:1px}
+.seg button:hover{background:var(--wash)}
+.seg button.on{background:var(--selbg);color:var(--selfg)}
+
+/* ---------- fretboard ---------- */
+.fretbox{padding:10px 10px 4px}
+.scroll{overflow-x:auto}
+#boardSvg{display:block;width:100%;height:auto;min-width:920px}
+.g-fret{stroke:var(--line);stroke-width:1.4}
+.g-string{stroke:var(--line)}
+.g-nut{fill:var(--ink)}
+.g-inlay{fill:var(--wash)}
+.g-fnum{fill:var(--mid);font-size:9.5px;text-anchor:middle}
+.g-slbl{fill:var(--mid);font-size:8.5px;text-anchor:middle;font-weight:600}
+.g-open{fill:var(--mid);font-size:11px;font-weight:700;text-anchor:middle}
+.opencell-bg{fill:var(--paper2)}
+.cell{fill:transparent;cursor:pointer}
+.cell:hover{fill:var(--hov)}
+#marks,#crosses{pointer-events:none}
+.found circle{fill:var(--selbg);stroke:var(--line);stroke-width:1.2}
+.found text{fill:var(--selfg);font-size:9.5px;font-weight:700;text-anchor:middle}
+.cross text{
+  fill:var(--err);font-size:27px;font-weight:800;text-anchor:middle;
+  stroke:var(--paper);stroke-width:3px;paint-order:stroke;
+}
+.hint{font-size:10.5px;color:var(--mid);line-height:1.45;padding:6px 10px;border-top:1px solid var(--line);margin:0}
+
+/* ---------- bottom actions ---------- */
+.actions{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.big{
+  border:1px solid var(--ink);background:transparent;padding:9px 18px;
+  font-size:12.5px;font-weight:700;letter-spacing:.08em;cursor:pointer;
+}
+.big:hover{background:var(--wash)}
+.actions .note{font-size:10.5px;color:var(--mid);margin-left:auto}
+@media(max-width:720px){.lbl{min-width:100%}}
+</style>
+</head>
+<body class="dark">
+
+<header class="top">
+  <h1>GUITAR TRAINER</h1>
+  <span class="tagline">find every position of the target note on the neck</span>
+</header>
+
+<main>
+  <section class="panel" id="ctrlSec">
+    <div class="ctrl-row">
+      <span class="lbl">KEY</span>
+      <div class="chips" id="keyRow"></div>
+      <div class="seg" id="keyModeRow"></div>
+    </div>
+    <div class="ctrl-row">
+      <span class="lbl">DEGREE</span>
+      <div class="chips" id="degRow"></div>
+      <div class="seg" id="degModeRow"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="taskSec">
+    <div class="bar">
+      <span class="bar-lbl">TASK</span>
+      <span id="taskLine">&mdash;</span>
+      <span class="spring"></span>
+      <span class="bar-aux" id="progressLbl">PROGRESS 0 / 0</span>
+      <span class="bar-aux" id="errorsLbl">ERRORS 0</span>
+      <button class="bar-btn" id="nextBtn" hidden>NEXT TASK &rarr;</button>
+    </div>
+  </section>
+
+  <section class="panel" id="fretSec">
+    <div class="fretbox">
+      <div class="scroll"><svg id="boardSvg" role="img" aria-label="Guitar fretboard"></svg></div>
+    </div>
+    <p class="hint">Open-string column left of the nut &middot; inlay markers at frets
+    3&nbsp;5&nbsp;7&nbsp;9&nbsp;12&nbsp;15&nbsp;17&nbsp;19&nbsp;21&nbsp;24, doubled at 12 and 24 &middot;
+    click any position (string &times; fret); the open string counts too.</p>
+  </section>
+
+  <div class="actions">
+    <button class="big" id="newBtn">NEW TASK</button>
+    <button class="big" id="resetBtn">RESET PROGRESS</button>
+    <span class="note">progress counts unique found positions &middot; wrong clicks only raise the error counter</span>
+  </div>
+</main>
+
+<script id="music-model">
+'use strict';
+/* ============================================================
+   MUSIC MODEL — pure data + pure functions, no DOM access.
+   Single source of truth for everything musical.
+   ============================================================ */
+
+// Note names, flats preferred (matches the poster).
+const NOTES = ['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
+
+// Degree label per semitone offset from the tonic (full chromatic set).
+const DEG_NAMES = ['1','♭2','2','♭3','3','4','♭5','5','♭6','6','♭7','7'];
+
+// Open string pitch classes, string 6 (low E) first. Standard tuning.
+const TUNING = [4, 9, 2, 7, 11, 4];
+
+// Fretboard span.
+const FRETS = 24;
+
+// Pitch class at a position. `str` is 6..1, `fret` is 0..24.
+function notePc(str, fret){
+  return (TUNING[6 - str] + fret) % 12;
+}
+
+// Pitch class of a degree: tonic + semitone offset of the degree label.
+function degToPc(keyPc, degIdx){
+  return (keyPc + degIdx) % 12;
+}
+
+// Every position on the neck that plays pitch class `pc`.
+function targetPositions(pc){
+  const out = [];
+  for (let s = 1; s <= 6; s++)
+    for (let f = 0; f <= FRETS; f++)
+      if (notePc(s, f) === pc) out.push({ str:s, fret:f });
+  return out;
+}
+
+// Model self-check: the spec examples plus structural invariants.
+// With 25 positions per string, an open-string pitch class occurs 3 times
+// on its string(s): E = 3+3+2*4 = 14, A/D/G/B = 13, the rest = 12.
+function selfCheck(){
+  const errs = [];
+  const chk = (keyPc, degIdx, want, name) => {
+    if (degToPc(keyPc, degIdx) !== want) errs.push('deg ' + name);
+  };
+  chk(0, 0, 0, 'C+1'); chk(0, 3, 3, 'C+b3'); chk(0, 4, 4, 'C+3');
+  chk(9, 3, 0, 'A+b3'); chk(4, 7, 11, 'E+5'); chk(7, 10, 5, 'G+b7');
+  for (let i = 0; i < 6; i++){
+    if (notePc(6 - i, 0) !== TUNING[i]) errs.push('open s' + (6 - i));
+    if (notePc(6 - i, FRETS) !== TUNING[i]) errs.push('f24 s' + (6 - i));
+  }
+  const want = { 4:14, 9:13, 2:13, 7:13, 11:13 };
+  let total = 0;
+  for (let pc = 0; pc < 12; pc++){
+    const n = targetPositions(pc).length;
+    total += n;
+    if (n !== (want[pc] || 12)) errs.push('count pc' + pc + '=' + n);
+  }
+  if (total !== 6 * (FRETS + 1)) errs.push('total ' + total);
+  return errs;
+}
+
+// Export for the test harness.
+if (typeof window !== 'undefined'){
+  window.__MODEL = { NOTES, DEG_NAMES, TUNING, FRETS, notePc, degToPc, targetPositions, selfCheck };
+}
+</script>
+
+<script>
+'use strict';
+/* ============================================================
+   APP — state, task lifecycle, rendering (reads the model above).
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const SVGNS = 'http://www.w3.org/2000/svg';
+const LSKEY = 'guitar-trainer-v1';
+const CROSS_MS = 650;                       // wrong-click marker lifetime
+
+function el(name, attrs, parent){
+  const e = document.createElementNS(SVGNS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function h(tag, attrs, parent){
+  const e = document.createElement(tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+/* ============================================================
+   State (persisted: only the control selections, never the task)
+   ============================================================ */
+function defaultState(){
+  return { keyPc:0, degIdx:0, keyRandom:false, degRandom:false };
+}
+function loadState(){
+  try{
+    const raw = localStorage.getItem(LSKEY);
+    if (!raw) return defaultState();
+    return Object.assign(defaultState(), JSON.parse(raw));
+  }catch(err){ return defaultState(); }
+}
+const state = loadState();
+function save(){ try{ localStorage.setItem(LSKEY, JSON.stringify(state)); }catch(err){} }
+
+/* ============================================================
+   Task lifecycle
+   ============================================================ */
+let task = null;
+
+// New task: honours the random toggles, clears every previous mark.
+function newTask(){
+  const keyPc = state.keyRandom ? Math.floor(Math.random() * 12) : state.keyPc;
+  const degIdx = state.degRandom ? Math.floor(Math.random() * 12) : state.degIdx;
+  const targetPc = degToPc(keyPc, degIdx);
+  task = {
+    keyPc, degIdx, targetPc,
+    positions: targetPositions(targetPc),   // computed from the real tuning
+    found: new Set(),                       // unique positions "str:fret"
+    errors: 0,
+    done: false
+  };
+  clearCrosses();
+  renderTask();
+  renderMarks();
+  renderStatus();
+}
+
+// Reset: clear marks and errors, keep the very same task (key/degree/target).
+function resetProgress(){
+  if (!task) return;
+  task.found.clear();
+  task.errors = 0;
+  task.done = false;
+  clearCrosses();
+  renderMarks();
+  renderStatus();
+}
+
+// Click correctness: found positions are no-ops, misses show a cross.
+function onCellClick(str, fret){
+  if (!task || task.done) return;
+  if (task.found.has(str + ':' + fret)) return;   // already found: not an error
+  if (notePc(str, fret) === task.targetPc){
+    task.found.add(str + ':' + fret);
+    renderMarks();
+    if (task.found.size === task.positions.length) task.done = true;
+    renderStatus();
+  } else {
+    task.errors++;
+    showCross(str, fret);
+    renderStatus();
+  }
+}
+
+/* ============================================================
+   Board geometry (mild taper like a real neck)
+   ============================================================ */
+const G = {
+  top:26, strGap:34,       // first string y, string spacing
+  numX:10,                 // string number column
+  openX:18, openW:44,      // open-string column
+  nutX:68, nutW:5,         // nut
+  fretsX0:76,              // x of the boundary between nut and fret 1
+  w1:46, w24:26            // fret cell widths, first and last
+};
+const XS = [G.fretsX0];
+for (let n = 1; n <= FRETS; n++){
+  XS.push(XS[n - 1] + G.w1 + (G.w24 - G.w1) * (n - 1) / (FRETS - 1));
+}
+const BOARD_W = XS[FRETS] + 16;
+const STR_Y = i => G.top + i * G.strGap;             // i = 0..5, string 1 first
+const BOARD_MID = G.top + 2.5 * G.strGap;            // between strings 3 and 4
+const BOARD_H = STR_Y(5) + 48;
+
+function cellCX(fret){
+  return fret === 0 ? G.openX + G.openW / 2 : (XS[fret - 1] + XS[fret]) / 2;
+}
+function stringY(str){ return STR_Y(str - 1); }
+
+/* ============================================================
+   Board build (static geometry once, dynamic layers on top)
+   ============================================================ */
+function buildBoard(){
+  const svg = $('boardSvg');
+  svg.setAttribute('viewBox', '0 0 ' + Math.ceil(BOARD_W) + ' ' + Math.ceil(BOARD_H));
+  const board = el('g', { id:'board' }, svg);
+
+  // inlay markers: singles + doubles at frets 12 and 24 (data-fret for tests)
+  for (const n of [3, 5, 7, 9, 15, 17, 19, 21]){
+    el('circle', { cx:cellCX(n), cy:BOARD_MID, r:5.5, class:'g-inlay', 'data-fret':n }, board);
+  }
+  for (const n of [12, 24]){
+    el('circle', { cx:cellCX(n), cy:BOARD_MID - G.strGap, r:5.5, class:'g-inlay', 'data-fret':n }, board);
+    el('circle', { cx:cellCX(n), cy:BOARD_MID + G.strGap, r:5.5, class:'g-inlay', 'data-fret':n }, board);
+  }
+
+  // fret wires 1..24
+  for (let n = 1; n <= FRETS; n++){
+    el('line', { x1:XS[n], y1:G.top - 10, x2:XS[n], y2:STR_Y(5) + 10, class:'g-fret' }, board);
+  }
+  // nut
+  el('rect', { x:G.nutX, y:G.top - 10, width:G.nutW, height:STR_Y(5) - G.top + 20, class:'g-nut' }, board);
+
+  // strings: 1 on top … 6 at the bottom, thicker towards the bass side
+  for (let i = 0; i < 6; i++){
+    el('line', { x1:G.openX, y1:STR_Y(i), x2:XS[FRETS] + 6, y2:STR_Y(i),
+      class:'g-string', 'stroke-width':(1 + i * 0.32).toFixed(2), 'data-str':(i + 1) }, board);
+    const num = el('text', { x:G.numX, y:STR_Y(i) + 3, class:'g-slbl' }, board);
+    num.textContent = String(i + 1);
+  }
+
+  // open-string column: note names (doubles as string labels)
+  for (let i = 0; i < 6; i++){
+    el('rect', { x:G.openX, y:STR_Y(i) - 15, width:G.openW, height:30, class:'opencell-bg' }, board);
+    const t = el('text', { x:cellCX(0), y:STR_Y(i) + 4, class:'g-open' }, board);
+    t.textContent = NOTES[notePc(i + 1, 0)];
+  }
+
+  // fret numbers 0..24
+  const nums = el('g', { id:'fnums' }, board);
+  const t0 = el('text', { x:cellCX(0), y:STR_Y(5) + 32, class:'g-fnum' }, nums);
+  t0.textContent = '0';
+  for (let n = 1; n <= FRETS; n++){
+    const t = el('text', { x:cellCX(n), y:STR_Y(5) + 32, class:'g-fnum' }, nums);
+    t.textContent = String(n);
+  }
+
+  // clickable hit rects: 6 open cells + 6 x 24 fret cells
+  const cells = el('g', { id:'cells' }, svg);
+  for (let s = 1; s <= 6; s++){
+    for (let f = 0; f <= FRETS; f++){
+      const r = el('rect', {
+        x: f === 0 ? G.openX : XS[f - 1] + 0.5,
+        y: stringY(s) - 16,
+        width: f === 0 ? G.openW : XS[f] - XS[f - 1] - 1,
+        height: 32,
+        class:'cell', 'data-str':s, 'data-fret':f, 'data-pc':notePc(s, f)
+      }, cells);
+      r.addEventListener('click', () => onCellClick(s, f));
+    }
+  }
+
+  // dynamic layers above the hit rects (never block clicks)
+  el('g', { id:'marks' }, svg);
+  el('g', { id:'crosses' }, svg);
+}
+
+/* ============================================================
+   Rendering
+   ============================================================ */
+function renderTask(){
+  $('taskLine').textContent = NOTES[task.keyPc] + ' → ' + DEG_NAMES[task.degIdx] +
+    ' (' + NOTES[task.targetPc] + ')';
+  // key chips: highlight the fixed pick, dim the whole row while random
+  [...$('keyRow').children].forEach(c =>
+    c.classList.toggle('on', !state.keyRandom && +c.dataset.pc === state.keyPc));
+  $('keyRow').classList.toggle('off', state.keyRandom);
+  [...$('degRow').children].forEach(c =>
+    c.classList.toggle('on', !state.degRandom && +c.dataset.deg === state.degIdx));
+  $('degRow').classList.toggle('off', state.degRandom);
+  // segs
+  for (const [rowId, on] of [['keyModeRow', state.keyRandom], ['degModeRow', state.degRandom]]){
+    [...$(rowId).children].forEach(b =>
+      b.classList.toggle('on', (b.textContent === 'RANDOM') === on));
+  }
+}
+
+function renderStatus(){
+  const total = task.positions.length;
+  $('progressLbl').textContent = task.done
+    ? 'COMPLETE ' + task.found.size + ' / ' + total
+    : 'PROGRESS ' + task.found.size + ' / ' + total;
+  $('errorsLbl').textContent = 'ERRORS ' + task.errors;
+  $('nextBtn').hidden = !task.done;
+}
+
+// Found marks: filled dot with the note name, visible until the task ends.
+function renderMarks(){
+  const g = $('marks');
+  while (g.firstChild) g.removeChild(g.firstChild);
+  for (const key of task.found){
+    const p = key.split(':');
+    const s = +p[0], f = +p[1];
+    const fg = el('g', { class:'found' }, g);
+    el('circle', { cx:cellCX(f), cy:stringY(s), r:11 }, fg);
+    const t = el('text', { x:cellCX(f), y:stringY(s) + 3.2 }, fg);
+    t.textContent = NOTES[task.targetPc];
+  }
+}
+
+/* ============================================================
+   Wrong-click crosses (auto-expire, never block the interface)
+   ============================================================ */
+const crossEls = new Map();
+function showCross(str, fret){
+  const key = str + ':' + fret;
+  hideCross(key);                          // re-miss: restart the timer
+  const g = el('g', { class:'cross' }, $('crosses'));
+  const t = el('text', { x:cellCX(fret), y:stringY(str) + 9 }, g);
+  t.textContent = '×';
+  crossEls.set(key, { g, t: setTimeout(() => hideCross(key), CROSS_MS) });
+}
+function hideCross(key){
+  const c = crossEls.get(key);
+  if (!c) return;
+  clearTimeout(c.t);
+  c.g.remove();
+  crossEls.delete(key);
+}
+function clearCrosses(){
+  for (const key of [...crossEls.keys()]) hideCross(key);
+}
+
+/* ============================================================
+   Controls
+   ============================================================ */
+function buildControls(){
+  const keyRow = $('keyRow');
+  NOTES.forEach((name, pc) => {
+    const b = h('button', { class:'chip', 'data-pc':pc }, keyRow);
+    b.textContent = name;
+    b.addEventListener('click', () => {
+      state.keyPc = pc;
+      state.keyRandom = false;             // explicit pick wins over random
+      save();
+      newTask();
+    });
+  });
+  const degRow = $('degRow');
+  DEG_NAMES.forEach((name, idx) => {
+    const b = h('button', { class:'chip', 'data-deg':idx }, degRow);
+    b.textContent = name;
+    b.addEventListener('click', () => {
+      state.degIdx = idx;
+      state.degRandom = false;
+      save();
+      newTask();
+    });
+  });
+  // mode segs: FIXED | RANDOM — applies to the next task, no forced reroll
+  buildSeg('keyModeRow', 'keyRandom');
+  buildSeg('degModeRow', 'degRandom');
+  $('newBtn').addEventListener('click', newTask);
+  $('resetBtn').addEventListener('click', resetProgress);
+  $('nextBtn').addEventListener('click', newTask);
+}
+function buildSeg(rowId, flag){
+  const row = $(rowId);
+  for (const label of ['FIXED', 'RANDOM']){
+    const b = h('button', {}, row);
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      state[flag] = label === 'RANDOM';
+      save();
+      renderTask();
+    });
+  }
+}
+
+/* ============================================================
+   Init
+   ============================================================ */
+buildControls();
+buildBoard();
+newTask();
+
+// Export for the test harness.
+window.__APP = {
+  state, getTask: () => task,
+  newTask, resetProgress, onCellClick,
+  showCross, hideCross, clearCrosses,
+  renderTask, renderStatus, renderMarks, CROSS_MS
+};
+</script>
+</body>
+</html>
